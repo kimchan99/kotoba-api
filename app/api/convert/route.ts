@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 
 // モード別のシステムプロンプト
@@ -120,18 +119,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Gemini API呼び出し
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      systemInstruction: PROMPTS[mode],
-    });
-
+    // Groq API呼び出し（OpenAI互換）
     const numbered = texts.map((t: string, i: number) => `[${i}] ${t}`).join("\n");
     const userPrompt = `以下のテキストをそれぞれ変換してください。番号付きでそのまま返してください。番号のフォーマットは [0], [1], ... のまま維持してください。\n\n${numbered}`;
 
-    const response = await model.generateContent(userPrompt);
-    const result = response.response.text();
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "system", content: PROMPTS[mode] },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 4096,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error("Groq API error:", response.status, err);
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const result = data.choices?.[0]?.message?.content || "";
 
     return NextResponse.json({ result });
   } catch (err: unknown) {
